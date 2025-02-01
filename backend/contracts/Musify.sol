@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.26;
 
 contract DecentralizedMusicPlatform {
     
@@ -14,6 +14,7 @@ contract DecentralizedMusicPlatform {
         uint256 totalRating;
         uint256 ratingCount;
         bool isAvailable;
+        string proofOfOwnership; // Hash or metadata proving ownership
     }
 
     // Structure to track user data
@@ -31,14 +32,11 @@ contract DecentralizedMusicPlatform {
     // Counter to generate unique track IDs
     uint256 public nextTrackId = 1;
 
-    // Event to emit when a track is uploaded
+    // Events
     event MusicUploaded(uint256 trackId, string title, string artist, uint256 price, address artistAddress);
-
-    // Event to emit when a track is listened to
     event MusicListened(uint256 trackId, address listener, uint256 amountPaid);
-
-    // Event to emit when a track is rated
     event TrackRated(uint256 trackId, address listener, uint8 rating);
+    event TrackRemoved(uint256 trackId, address artist);
 
     // Modifier to ensure only the artist can perform certain actions
     modifier onlyArtist(uint256 _trackId) {
@@ -52,14 +50,16 @@ contract DecentralizedMusicPlatform {
         _;
     }
 
-    // Function for artists to upload their music
+    // Function for artists to upload their music with proof of ownership
     function uploadMusic(
         string memory _title,
         string memory _artist,
         string memory _genre,
-        uint256 _price
+        uint256 _price,
+        string memory _proofOfOwnership
     ) external {
         require(_price > 0, "Price should be greater than 0");
+        require(bytes(_proofOfOwnership).length > 0, "Proof of ownership is required");
 
         uint256 trackId = nextTrackId;
         nextTrackId++;
@@ -73,13 +73,14 @@ contract DecentralizedMusicPlatform {
             totalListeners: 0,
             totalRating: 0,
             ratingCount: 0,
-            isAvailable: true
+            isAvailable: true,
+            proofOfOwnership: _proofOfOwnership
         });
 
         emit MusicUploaded(trackId, _title, _artist, _price, msg.sender);
     }
 
-    // Function for users to subscribe to a track
+    // Function for users to subscribe to a track (No streaming, only payments)
     function subscribeToMusic(uint256 _trackId) external payable trackAvailable(_trackId) {
         Music storage track = musicLibrary[_trackId];
         require(msg.value == track.price, "Incorrect payment amount.");
@@ -88,10 +89,10 @@ contract DecentralizedMusicPlatform {
         // Mark the user as subscribed
         users[msg.sender].hasSubscribed[_trackId] = true;
 
-        // Pay the artist in one transaction
+        // Pay the artist directly
         track.artistAddress.transfer(msg.value);
 
-        // Emit the event for listening
+        // Emit the event for listening (but no actual streaming mechanism)
         emit MusicListened(_trackId, msg.sender, msg.value);
     }
 
@@ -105,38 +106,21 @@ contract DecentralizedMusicPlatform {
         track.totalRating += _rating;
         track.ratingCount++;
 
-        // Optionally, you could update the artist's reputation based on the average rating
         uint256 averageRating = track.totalRating / track.ratingCount;
         users[track.artistAddress].reputation = averageRating;
 
         emit TrackRated(_trackId, msg.sender, _rating);
     }
 
-    // Function to list available tracks (view function, no state changes)
-    function getAvailableTracks() external view returns (Music[] memory availableTracks) {
-        uint256 trackCount = nextTrackId - 1; // Exclude track ID 0
-        uint256 availableCount = 0;
-
-        for (uint256 i = 1; i <= trackCount; i++) {
-            if (musicLibrary[i].isAvailable) {
-                availableCount++;
-            }
-        }
-
-        availableTracks = new Music[](availableCount);
-        uint256 index = 0;
-
-        for (uint256 i = 1; i <= trackCount; i++) {
-            if (musicLibrary[i].isAvailable) {
-                availableTracks[index] = musicLibrary[i];
-                index++;
-            }
-        }
-    }
-
-    // Function to remove a music track (only the artist can do this)
+    // Function to remove a music track (No Refunds for users)
     function removeMusic(uint256 _trackId) external onlyArtist(_trackId) {
         musicLibrary[_trackId].isAvailable = false;
+        emit TrackRemoved(_trackId, msg.sender);
+    }
+
+    // Function to verify proof of ownership
+    function getProofOfOwnership(uint256 _trackId) external view returns (string memory) {
+        return musicLibrary[_trackId].proofOfOwnership;
     }
 
     // Function to get the reputation of a user
@@ -144,13 +128,13 @@ contract DecentralizedMusicPlatform {
         return users[_user].reputation;
     }
 
-    // Fallback function to receive Ether (if any user sends directly to the contract)
-    receive() external payable {}
-
-    // Helper function to get the average rating of a track
+    // Function to get the average rating of a track
     function getTrackAverageRating(uint256 _trackId) external view returns (uint256) {
         Music storage track = musicLibrary[_trackId];
         if (track.ratingCount == 0) return 0;
         return track.totalRating / track.ratingCount;
     }
+
+    // Receive function to accept payments
+    receive() external payable {}
 }
